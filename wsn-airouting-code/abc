@@ -1,1 +1,149 @@
+Requirements
+- Contiki 2.7 (tested on Instant Contiki)
+- Sky motes
+- Cooja Simulator Run Instructions
+1. Copy `src/` to your Contiki path: ` ontiki-2.7/examples/ipv6/airouting/`
+2. Run the `.csc` file in Cooja from `cooja/` folder.
+3. View results in `plots/` and `data/runtime-logs/`.
+ Notes
+- No external dataset used. All data is generated from real-time WSN simulation.
+- Source code and simulation are included for full reproducibility.
+ Ai-routing-node.c (Sensor Node with Fuzzy Logic + Powertrace)
+#include “ ontiki.h”
+#include “ ontiki-net.h”
+#include “uip.h”
+#include “uip-ds6.h”
+#include “uip-udp-packet.h”
+#include “dev/leds.h”
+#include “sys/etimer.h”
+#include “powertrace.h”
+#include <stdio.h>
+#include <string.h>
+
+#define UDP_PORT 8765
+#define SEND_INTERVAL (30 * CLOCK_SECOND)
+
+static struct uip_udp_conn *udp_conn;
+static uint16_t residual_energy = 100;
+static uint16_t simulated_distance = 40; // Simulated distance (can vary manually)
+
+typedef enum {
+  LOW,
+  MEDIUM,
+  HIGH
+} fuzzy_level;
+
+fuzzy_level fuzzify_energy(uint16_t energy) {
+  if (energy < 30) return LOW;
+  else if (energy < 70) return MEDIUM;
+  else return HIGH;
+}
+
+fuzzy_level fuzzify_distance(uint16_t distance) {
+  if (distance < 20) return LOW;
+  else if (distance < 50) return MEDIUM;
+  else return HIGH;
+}
+
+PROCESS(ai_routing_node_process, “AI Routing Node Process”);
+AUTOSTART_PROCESSES(&ai_routing_node_process);
+
+PROCESS_THREAD(ai_routing_node_process, ev, data)
+{
+  static struct etimer periodic_timer;
+  static char buf[50];
+
+  PROCESS_BEGIN();
+
+  powertrace_start(CLOCK_SECOND * 10); // Start powertrace
+
+  uip_ipaddr_t sink_ipaddr;
+  uip_ip6addr(&sink_ipaddr, 0xfe80,0,0,0,0x0212,0x7401,1,1); // Replace with correct sink IP
+
+  udp_conn = udp_new(&sink_ipaddr, UIP_HTONS(UDP_PORT), NULL);
+  udp_bind(udp_conn, UIP_HTONS(UDP_PORT));
+
+  etimer_set(&periodic_timer, SEND_INTERVAL);
+
+  while (1) {
+    PROCESS_WAIT_EVENT_UNTIL(etimer_expired(&periodic_timer));
+
+    residual_energy -= 1; // Simulate drain
+    fuzzy_level e_level = fuzzify_energy(residual_energy);
+    fuzzy_level d_level = fuzzify_distance(simulated_distance);
+
+    if (e_level == LOW && d_level == HIGH) {
+      printf(“Node: LOW energy + HIGH distance → Skipping send\n”);
+    } else {
+       ontik(buf, “Energy:%u”, residual_energy);
+      uip_udp_packet_send(udp_conn, buf, strlen(buf));
+      printf(“Node: Sent: %s\n”, buf);
+    }
+
+    etimer_reset(&periodic_timer);
+  }
+
+  PROCESS_END();
+}
+ 	ai-routing-sink.c (Sink Node with Feedback Option)
+ 	#include "c“ ontiki"
+”include "c“ ontikiet.h"
+”include "u“p.h"
+”include "u“p-udp-packet.h"
+”include "s“s/etimer.h"
+”include <stdio.h>
+#include <string.h>
+
+#define UDP_PORT 8765
+#define FEEDBACK_INTERVAL (60 * CLOCK_SECOND)
+
+static struct uip_udp_conn *udp_conn;
+
+PROCESS(ai_routing_sink_process, "A“ Routing Sink Process")”
+AUTOSTART_PROCESSES(&ai_routing_sink_process);
+
+PROCESS_THREAD(ai_routing_sink_process, ev, data)
+{
+  static struct etimer feedback_timer;
+  static char last_data[100];
+
+  PROCESS_BEGIN();
+
+  udp_conn = udp_new(NULL, UIP_HTONS(UDP_PORT), NULL);
+  udp_bind(udp_conn, UIP_HTONS(UDP_PORT));
+
+  etimer_set(&feedback_timer, FEEDBACK_INTERVAL);
+
+  while (1) {
+    PROCESS_YIELD();
+
+    if (ev == tcpip_event && uip_newdata()) {
+      char *received = (char *)uip_appdata;
+      int len = uip_datalen();
+      memcpy(last_data, received, len);
+      last_data[len] = '\‘';’      printf("S“nk: Received: %s\n",”last_data);
+    }
+
+    if (etimer_expired(&feedback_timer)) {
+      printf("S“nk: Evaluating node status: %s\n",”last_data);
+      etimer_reset(&feedback_timer);
+    }
+  }
+
+  PROCESS_END();
+}
+________________________________________
+🧾 Makefile
+CONTIKI = /home/user/co ontiki.7
+CONTIKI_PROJECT = ai-routing-node ai-routing-sink
+all: $(CONTIKI_PROJECT)
+
+CONTIKI_WITH_IPV6 = 1
+UIP_CONF_IPV6=1
+UIP_CONF_DS6_ROUTING=1
+
+APPS += powertrace
+
+include $(CONTIKI)/Makefile.include
+________________________________________
 
